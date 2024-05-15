@@ -50,6 +50,8 @@ subdir('preview')
 subdir('post_processing_stages')
 subdir('utils')
 
+cpp_arguments += '-Wno-error'
+
 add_project_arguments(cpp_arguments, language : 'cpp')
 
 rpicam_app = library(

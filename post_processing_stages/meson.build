@@ -22,6 +22,7 @@ if enable_opencv and opencv_dep.found()
     rpicam_app_src += files([
         'sobel_cv_stage.cpp',
         'face_detect_cv_stage.cpp',
+        'text_detect_cv_stage.cpp',
         'annotate_cv_stage.cpp',
         'plot_pose_cv_stage.cpp',
         'object_detect_draw_cv_stage.cpp',
