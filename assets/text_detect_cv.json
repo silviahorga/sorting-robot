@@ -1,19 +1,11 @@
 {
-    "text_detect_cv":
-    {
-        "cascade_name" : "/home/bart/Downloads/haarcascade_frontalface_alt.xml",
-	"det_model_name" : "/home/bart/Downloads/frozen_east_text_detection.pb",
-	"rec_model_name" : "/home/bart/Downloads/CRNN_VGG_BiLSTM_CTC.onnx",
-	"vocabulary_name" : "/home/bart/Downloads/alphabet_36.txt",
-        "scaling_factor" : 1.1,
-        "min_neighbors" : 2,
-        "min_size" : 32,
-        "max_size" : 256,
-        "refresh_rate" : 1,
-        "draw_features" : 1,
-	"width" : 640,
-	"height" : 480,
-	"conf_threshold" : 0.5,
-	"nms_threshold" : 0.4
-    }
+  "text_detect_cv": {
+    "det_model_name": "/home/bart/Downloads/DB_TD500_resnet18.onnx",
+    "rec_model_name": "/home/bart/Downloads/CRNN_VGG_BiLSTM_CTC.onnx",
+    "vocabulary_name": "/home/bart/Downloads/alphabet_36.txt",
+    "refresh_rate": 1,
+    "draw_features": 1,
+    "width": 640,
+    "height": 480
+  }
 }

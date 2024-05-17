@@ -57,22 +57,14 @@ private:
 	Mat image_;
 	std::vector<std::vector<Point>> contours_;
 	std::vector<std::string> text_;
-	TextDetectionModel_EAST detector_;
+	TextDetectionModel_DB detector_;
 	TextRecognitionModel recognizer_;
 	std::vector<std::string> vocabulary_;
 	std::string detModelName_;
 	std::string recModelName_;
 	std::string vocName_;
-	double scaling_factor_;
-	int min_neighbors_;
-	int min_size_;
-	int max_size_;
 	int refresh_rate_;
 	int draw_features_;
-	int width_;
-	int height_;
-	float conf_threshold_;
-	float nms_threshold_;
 };
 
 #define NAME "text_detect_cv"
@@ -84,25 +76,26 @@ char const *TextDetectCvStage::Name() const
 
 void TextDetectCvStage::Read(boost::property_tree::ptree const &params)
 {
-	detModelName_ = params.get<char>("det_model_name", "/usr/local/share/OpenCV/east.pb");
-	detector_ = TextDetectionModel_EAST(detModelName_);
+	detModelName_ = params.get<char>("det_model_name", "/usr/local/share/OpenCV/db.pb");
+	detector_ = TextDetectionModel_DB(detModelName_);
 
 	recModelName_ = params.get<char>("rec_model_name", "/usr/local/share/OpenCV/crnn.onnx");
 	recognizer_ = TextRecognitionModel(recModelName_);
 
 	vocName_ = params.get<char>("vocabulary_name", "/usr/local/share/OpenCV/vocabulary.txt");
-	scaling_factor_ = params.get<double>("scaling_factor", 1.1);
-	min_neighbors_ = params.get<int>("min_neighbors", 3);
-	min_size_ = params.get<int>("min_size", 32);
-	max_size_ = params.get<int>("max_size", 256);
 	refresh_rate_ = params.get<int>("refresh_rate", 5);
 	draw_features_ = params.get<int>("draw_features", 1);
-	width_ = params.get<int>("width", 320);
-	height_ = params.get<int>("height", 320);
-	conf_threshold_ = params.get<float>("conf_threshold", 0.5);
-	nms_threshold_ = params.get<float>("nms_threshold", 0.4);
+	int width = params.get<int>("width", 320);
+	int height = params.get<int>("height", 320);
+	float binThresh = params.get<float>("bin_thresh", 0.3);
+	float polyThresh = params.get<float>("ply_thresh", 0.5);
+	int maxCandidates = params.get<int>("max_candidates", 200);
+	float unclipRatio = params.get<float>("unclip_ratio", 2.0);
 
-	detector_.setConfidenceThreshold(conf_threshold_).setNMSThreshold(nms_threshold_);
+	detector_.setBinaryThreshold(binThresh)
+		.setPolygonThreshold(polyThresh)
+		.setMaxCandidates(maxCandidates)
+		.setUnclipRatio(unclipRatio);
 
 	std::ifstream vocFile;
 	vocFile.open(samples::findFile(vocName_));
@@ -120,11 +113,10 @@ void TextDetectCvStage::Read(boost::property_tree::ptree const &params)
 	recognizer_.setInputParams(recScale, recInputSize, recMean);
 
 	// Parameters for Detecction
-	double detScale = 1.0;
-	Size detInputSize = Size(width_, height_);
-	Scalar detMean = Scalar(123.68, 116.78, 103.94);
-	bool swapRB = true;
-	detector_.setInputParams(detScale, detInputSize, detMean, swapRB);
+	double scale = 1.0 / 255.0;
+	Scalar mean = Scalar(122.67891434, 116.66876762, 104.00698793);
+	Size inputSize = Size(width, height);
+	detector_.setInputParams(scale, inputSize, mean);
 }
 
 void TextDetectCvStage::Configure()
