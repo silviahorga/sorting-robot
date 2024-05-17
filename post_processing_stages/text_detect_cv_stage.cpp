@@ -1,7 +1,5 @@
 /* SPDX-License-Identifier: BSD-2-Clause */
 /*
- * Copyright (C) 2021, Raspberry Pi (Trading) Limited
- *
  * text_detect_cv_stage.cpp - Text Detector implementation, using OpenCV
  */
 #include <iostream>
@@ -45,7 +43,7 @@ public:
 	void Stop() override;
 
 private:
-	void detectFeatures(cv::CascadeClassifier &cascade);
+	void detectFeatures();
 	void fourPointsTransform(const Mat &frame, const Point2f vertices[], Mat &result);
 	void drawFeatures(cv::Mat &img);
 
@@ -54,17 +52,14 @@ private:
 	Stream *full_stream_;
 	StreamInfo full_stream_info_;
 	std::unique_ptr<std::future<void>> future_ptr_;
-	std::mutex face_mutex_;
+	std::mutex text_mutex_;
 	std::mutex future_ptr_mutex_;
 	Mat image_;
-	std::vector<cv::Rect> faces_;
 	std::vector<std::vector<Point>> contours_;
 	std::vector<std::string> text_;
-	CascadeClassifier cascade_;
 	TextDetectionModel_EAST detector_;
 	TextRecognitionModel recognizer_;
 	std::vector<std::string> vocabulary_;
-	std::string cascadeName_;
 	std::string detModelName_;
 	std::string recModelName_;
 	std::string vocName_;
@@ -89,11 +84,6 @@ char const *TextDetectCvStage::Name() const
 
 void TextDetectCvStage::Read(boost::property_tree::ptree const &params)
 {
-	cascadeName_ =
-		params.get<char>("cascade_name", "/usr/local/share/OpenCV/haarcascades/haarcascade_frontalface_alt.xml");
-	if (!cascade_.load(cascadeName_))
-		throw std::runtime_error("TextDetectCvStage: failed to load haar classifier");
-
 	detModelName_ = params.get<char>("det_model_name", "/usr/local/share/OpenCV/east.pb");
 	detector_ = TextDetectionModel_EAST(detModelName_);
 
@@ -107,8 +97,8 @@ void TextDetectCvStage::Read(boost::property_tree::ptree const &params)
 	max_size_ = params.get<int>("max_size", 256);
 	refresh_rate_ = params.get<int>("refresh_rate", 5);
 	draw_features_ = params.get<int>("draw_features", 1);
-	width_ = params.get<int>("width");
-	height_ = params.get<int>("height");
+	width_ = params.get<int>("width", 320);
+	height_ = params.get<int>("height", 320);
 	conf_threshold_ = params.get<float>("conf_threshold", 0.5);
 	nms_threshold_ = params.get<float>("nms_threshold", 0.4);
 
@@ -153,7 +143,7 @@ void TextDetectCvStage::Configure()
 	low_res_info_ = app_->GetStreamInfo(stream_);
 
 	// We also expect there to be a "full resolution" stream which defines the output coordinate
-	// system, and we can optionally draw the faces there too.
+	// system, and we can optionally draw the text there too.
 	full_stream_ = app_->GetMainStream();
 	if (!full_stream_)
 		throw std::runtime_error("TextDetectCvStage: no full resolution stream available");
@@ -190,16 +180,18 @@ bool TextDetectCvStage::Process(CompletedRequestPtr &completed_request)
 			image_ = image.clone();
 
 			future_ptr_ = std::make_unique<std::future<void>>();
-			*future_ptr_ = std::async(std::launch::async, [this] { detectFeatures(cascade_); });
+			*future_ptr_ = std::async(std::launch::async, [this] { detectFeatures(); });
 		}
 	}
 
-	std::unique_lock<std::mutex> lock(face_mutex_);
+	std::unique_lock<std::mutex> lock(text_mutex_);
 
+	/*
 	std::vector<libcamera::Rectangle> temprect;
 	std::transform(faces_.begin(), faces_.end(), std::back_inserter(temprect),
 				   [](Rect &r) { return libcamera::Rectangle(r.x, r.y, r.width, r.height); });
 	completed_request->post_process_metadata.Set("detected_faces", temprect);
+	 */
 
 	if (draw_features_)
 	{
@@ -213,16 +205,8 @@ bool TextDetectCvStage::Process(CompletedRequestPtr &completed_request)
 	return false;
 }
 
-void TextDetectCvStage::detectFeatures(CascadeClassifier &cascade)
+void TextDetectCvStage::detectFeatures()
 {
-	//equalizeHist(image_, image_);
-
-	std::vector<Rect> temp_faces;
-
-	//cascade.detectMultiScale(image_, temp_faces, scaling_factor_, min_neighbors_, CASCADE_SCALE_IMAGE,
-	//Size(min_size_, min_size_), Size(max_size_, max_size_));
-
-	// Detect text start
 	std::vector<std::vector<Point>> detResults;
 	detector_.detect(image_, detResults);
 
@@ -251,21 +235,8 @@ void TextDetectCvStage::detectFeatures(CascadeClassifier &cascade)
 			std::cout << i << ": '" << recognitionResult << "'" << std::endl;
 		}
 	}
-	// Detect text end
 
-	// Scale faces back to the size and location in the full res image.
-	double scale_x = full_stream_info_.width / (double)low_res_info_.width;
-	double scale_y = full_stream_info_.height / (double)low_res_info_.height;
-	for (auto &face : temp_faces)
-	{
-		face.x *= scale_x;
-		face.y *= scale_y;
-		face.width *= scale_x;
-		face.height *= scale_y;
-	}
-
-	std::unique_lock<std::mutex> lock(face_mutex_);
-	faces_ = std::move(temp_faces);
+	std::unique_lock<std::mutex> lock(text_mutex_);
 	contours_ = std::move(contours);
 	text_ = std::move(text);
 }
@@ -283,32 +254,6 @@ void TextDetectCvStage::fourPointsTransform(const Mat &frame, const Point2f vert
 
 void TextDetectCvStage::drawFeatures(Mat &img)
 {
-	const static Scalar colors[] = {
-		Scalar(255, 0, 0),	 Scalar(255, 128, 0), Scalar(255, 255, 0), Scalar(0, 255, 0),
-		Scalar(0, 128, 255), Scalar(0, 255, 255), Scalar(0, 0, 255),   Scalar(255, 0, 255)
-	};
-
-	// Draw faces
-	for (size_t i = 0; i < faces_.size(); i++)
-	{
-		Rect r = faces_[i];
-		Point center;
-		Scalar color = colors[i % 8];
-		int radius;
-		double aspect_ratio = (double)r.width / r.height;
-
-		if (0.75 < aspect_ratio && aspect_ratio < 1.3)
-		{
-			center.x = cvRound(r.x + r.width * 0.5);
-			center.y = cvRound(r.y + r.height * 0.5);
-			radius = cvRound((r.width + r.height) * 0.25);
-			circle(img, center, radius, color, 3, 8, 0);
-		}
-		else
-			rectangle(img, Point(cvRound(r.x), cvRound(r.y)),
-					  Point(cvRound(r.x + r.width - 1), cvRound(r.y + r.height - 1)), color, 3, 8, 0);
-	}
-
 	// Draw text
 	for (size_t i = 0; i < contours_.size(); i++)
 	{
