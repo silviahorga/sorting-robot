@@ -58,11 +58,12 @@ private:
 	std::mutex future_ptr_mutex_;
 	Mat image_;
 	std::vector<cv::Rect> faces_;
-	std::string text_;
+	std::vector<std::vector<Point>> contours_;
+	std::vector<std::string> text_;
 	CascadeClassifier cascade_;
 	TextDetectionModel_EAST detector_;
 	TextRecognitionModel recognizer_;
-	std::vector<String> vocabulary_;
+	std::vector<std::string> vocabulary_;
 	std::string cascadeName_;
 	std::string detModelName_;
 	std::string recModelName_;
@@ -171,13 +172,17 @@ bool TextDetectCvStage::Process(CompletedRequestPtr &completed_request)
 		if (completed_request->sequence % refresh_rate_ == 0 &&
 			(!future_ptr_ || future_ptr_->wait_for(std::chrono::seconds(0)) == std::future_status::ready))
 		{
-			if (future_ptr_ && future_ptr_->valid()) {
-            			try {
-                			future_ptr_->get(); // This will rethrow the captured exception if any
-            			} catch (const std::exception &e) {
-                			std::cerr << "Error in detectFeatures: " << e.what() << std::endl;
-            			}
-        		}
+			if (future_ptr_ && future_ptr_->valid())
+			{
+				try
+				{
+					future_ptr_->get(); // This will rethrow the captured exception if any
+				}
+				catch (const std::exception &e)
+				{
+					std::cerr << "Error in detectFeatures: " << e.what() << std::endl;
+				}
+			}
 			BufferReadSync r(app_, completed_request->buffers[stream_]);
 			libcamera::Span<uint8_t> buffer = r.Get()[0];
 			uint8_t *ptr = (uint8_t *)buffer.data();
@@ -190,8 +195,6 @@ bool TextDetectCvStage::Process(CompletedRequestPtr &completed_request)
 	}
 
 	std::unique_lock<std::mutex> lock(face_mutex_);
-
-	std::cout << "text: " << text_ << std::endl;
 
 	std::vector<libcamera::Rectangle> temprect;
 	std::transform(faces_.begin(), faces_.end(), std::back_inserter(temprect),
@@ -213,19 +216,22 @@ bool TextDetectCvStage::Process(CompletedRequestPtr &completed_request)
 void TextDetectCvStage::detectFeatures(CascadeClassifier &cascade)
 {
 	//equalizeHist(image_, image_);
-	
+
 	std::vector<Rect> temp_faces;
 
 	//cascade.detectMultiScale(image_, temp_faces, scaling_factor_, min_neighbors_, CASCADE_SCALE_IMAGE,
-							 //Size(min_size_, min_size_), Size(max_size_, max_size_));
+	//Size(min_size_, min_size_), Size(max_size_, max_size_));
 
 	// Detect text start
 	std::vector<std::vector<Point>> detResults;
 	detector_.detect(image_, detResults);
 
+	cvtColor(image_, image_, cv::COLOR_BGR2GRAY);
+	std::vector<std::vector<Point>> contours;
+	std::vector<std::string> text;
+
 	if (detResults.size() > 0)
 	{
-		std::vector<std::vector<Point>> contours;
 		for (uint i = 0; i < detResults.size(); i++)
 		{
 			const auto &quadrangle = detResults[i];
@@ -241,11 +247,9 @@ void TextDetectCvStage::detectFeatures(CascadeClassifier &cascade)
 			fourPointsTransform(image_, &quadrangle_2f[0], cropped);
 
 			std::string recognitionResult = recognizer_.recognize(cropped);
+			text.emplace_back(recognitionResult);
 			std::cout << i << ": '" << recognitionResult << "'" << std::endl;
-
-			// putText(frame2, recognitionResult, quadrangle[3], FONT_HERSHEY_SIMPLEX, 1.5, Scalar(0, 0, 255), 2);
 		}
-		// polylines(frame2, contours, true, Scalar(0, 255, 0), 2);
 	}
 	// Detect text end
 
@@ -259,9 +263,11 @@ void TextDetectCvStage::detectFeatures(CascadeClassifier &cascade)
 		face.width *= scale_x;
 		face.height *= scale_y;
 	}
+
 	std::unique_lock<std::mutex> lock(face_mutex_);
 	faces_ = std::move(temp_faces);
-	text_ = std::move(std::to_string(detResults.size()));
+	contours_ = std::move(contours);
+	text_ = std::move(text);
 }
 
 void TextDetectCvStage::fourPointsTransform(const Mat &frame, const Point2f vertices[], Mat &result)
@@ -282,10 +288,7 @@ void TextDetectCvStage::drawFeatures(Mat &img)
 		Scalar(0, 128, 255), Scalar(0, 255, 255), Scalar(0, 0, 255),   Scalar(255, 0, 255)
 	};
 
-	// for testing
-	if (!text_.empty())
-		rectangle(img, Point(0, 0), Point(40, 40), colors[0], 3, 8, 0);
-
+	// Draw faces
 	for (size_t i = 0; i < faces_.size(); i++)
 	{
 		Rect r = faces_[i];
@@ -305,6 +308,16 @@ void TextDetectCvStage::drawFeatures(Mat &img)
 			rectangle(img, Point(cvRound(r.x), cvRound(r.y)),
 					  Point(cvRound(r.x + r.width - 1), cvRound(r.y + r.height - 1)), color, 3, 8, 0);
 	}
+
+	// Draw text
+	for (size_t i = 0; i < contours_.size(); i++)
+	{
+		const auto &quadrangle = contours_[i];
+		const auto &text = text_[i];
+		putText(img, text, quadrangle[3], FONT_HERSHEY_SIMPLEX, 1.5, Scalar(0, 0, 255), 2);
+	}
+	// Draw contours
+	polylines(img, contours_, true, Scalar(0, 255, 0), 2);
 }
 
 void TextDetectCvStage::Stop()
