@@ -89,14 +89,16 @@ void TextDetectCvStage::Read(boost::property_tree::ptree const &params)
 	int height = params.get<int>("height", 320);
 	float binThresh = params.get<float>("bin_thresh", 0.3);
 	float polyThresh = params.get<float>("ply_thresh", 0.5);
-	int maxCandidates = params.get<int>("max_candidates", 200);
+	int maxCandidates = params.get<int>("max_candidates", 5);
 	float unclipRatio = params.get<float>("unclip_ratio", 2.0);
 
+	// Load detection model
 	detector_.setBinaryThreshold(binThresh)
 		.setPolygonThreshold(polyThresh)
 		.setMaxCandidates(maxCandidates)
 		.setUnclipRatio(unclipRatio);
 
+	// Load vocabulary
 	std::ifstream vocFile;
 	vocFile.open(samples::findFile(vocName_));
 	String vocLine;
@@ -107,12 +109,13 @@ void TextDetectCvStage::Read(boost::property_tree::ptree const &params)
 	recognizer_.setVocabulary(vocabulary_);
 	recognizer_.setDecodeType("CTC-greedy");
 
+	// Parameters for Recognition
 	double recScale = 1.0 / 127.5;
 	Scalar recMean = Scalar(127.5, 127.5, 127.5);
 	Size recInputSize = Size(100, 32);
 	recognizer_.setInputParams(recScale, recInputSize, recMean);
 
-	// Parameters for Detecction
+	// Parameters for Detection
 	double scale = 1.0 / 255.0;
 	Scalar mean = Scalar(122.67891434, 116.66876762, 104.00698793);
 	Size inputSize = Size(width, height);
@@ -201,6 +204,7 @@ void TextDetectCvStage::detectFeatures()
 {
 	std::vector<std::vector<Point>> detResults;
 	detector_.detect(image_, detResults);
+	std::cout << image_.size() << std::endl;
 
 	cvtColor(image_, image_, cv::COLOR_BGR2GRAY);
 	std::vector<std::vector<Point>> contours;
@@ -222,10 +226,25 @@ void TextDetectCvStage::detectFeatures()
 			Mat cropped;
 			fourPointsTransform(image_, &quadrangle_2f[0], cropped);
 
+			imshow("cropped", cropped);
 			std::string recognitionResult = recognizer_.recognize(cropped);
 			text.emplace_back(recognitionResult);
 			std::cout << i << ": '" << recognitionResult << "'" << std::endl;
 		}
+	}
+
+	// Scale contours back to the size and location in the full res image.
+	double scale_x = full_stream_info_.width / (double)low_res_info_.width;
+	double scale_y = full_stream_info_.height / (double)low_res_info_.height;
+	for (auto &quadrangle : contours)
+	{
+		std::cout << "quadrangle: " << quadrangle << std::endl;
+		for (auto &point : quadrangle)
+		{
+			point.x *= scale_x;
+			point.y *= scale_y;
+		}
+		std::cout << "quadrangle: " << quadrangle << std::endl;
 	}
 
 	std::unique_lock<std::mutex> lock(text_mutex_);
