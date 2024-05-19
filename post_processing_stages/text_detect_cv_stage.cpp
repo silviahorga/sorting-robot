@@ -85,8 +85,8 @@ void TextDetectCvStage::Read(boost::property_tree::ptree const &params)
 	vocName_ = params.get<char>("vocabulary_name", "/usr/local/share/OpenCV/vocabulary.txt");
 	refresh_rate_ = params.get<int>("refresh_rate", 5);
 	draw_features_ = params.get<int>("draw_features", 1);
-	int width = params.get<int>("width", 320);
-	int height = params.get<int>("height", 320);
+	int width = params.get<int>("width", 736);
+	int height = params.get<int>("height", 736);
 	float binThresh = params.get<float>("bin_thresh", 0.3);
 	float polyThresh = params.get<float>("ply_thresh", 0.5);
 	int maxCandidates = params.get<int>("max_candidates", 5);
@@ -171,7 +171,7 @@ bool TextDetectCvStage::Process(CompletedRequestPtr &completed_request)
 			BufferReadSync r(app_, completed_request->buffers[stream_]);
 			libcamera::Span<uint8_t> buffer = r.Get()[0];
 			uint8_t *ptr = (uint8_t *)buffer.data();
-			Mat image(low_res_info_.height, low_res_info_.width, CV_8UC3, ptr, low_res_info_.stride * 3);
+			Mat image(low_res_info_.height, low_res_info_.width, CV_8U, ptr, low_res_info_.stride);
 			image_ = image.clone();
 
 			future_ptr_ = std::make_unique<std::future<void>>();
@@ -203,10 +203,10 @@ bool TextDetectCvStage::Process(CompletedRequestPtr &completed_request)
 void TextDetectCvStage::detectFeatures()
 {
 	std::vector<std::vector<Point>> detResults;
-	detector_.detect(image_, detResults);
-	std::cout << image_.size() << std::endl;
+	Mat image_bgr;
+	cvtColor(image_, image_bgr, COLOR_GRAY2BGR);
+	detector_.detect(image_bgr, detResults);
 
-	cvtColor(image_, image_, cv::COLOR_BGR2GRAY);
 	std::vector<std::vector<Point>> contours;
 	std::vector<std::string> text;
 
@@ -226,7 +226,6 @@ void TextDetectCvStage::detectFeatures()
 			Mat cropped;
 			fourPointsTransform(image_, &quadrangle_2f[0], cropped);
 
-			imshow("cropped", cropped);
 			std::string recognitionResult = recognizer_.recognize(cropped);
 			text.emplace_back(recognitionResult);
 			std::cout << i << ": '" << recognitionResult << "'" << std::endl;
@@ -238,13 +237,11 @@ void TextDetectCvStage::detectFeatures()
 	double scale_y = full_stream_info_.height / (double)low_res_info_.height;
 	for (auto &quadrangle : contours)
 	{
-		std::cout << "quadrangle: " << quadrangle << std::endl;
 		for (auto &point : quadrangle)
 		{
 			point.x *= scale_x;
 			point.y *= scale_y;
 		}
-		std::cout << "quadrangle: " << quadrangle << std::endl;
 	}
 
 	std::unique_lock<std::mutex> lock(text_mutex_);
@@ -254,7 +251,15 @@ void TextDetectCvStage::detectFeatures()
 
 void TextDetectCvStage::fourPointsTransform(const Mat &frame, const Point2f vertices[], Mat &result)
 {
-	const Size outputSize = Size(100, 32);
+	float widthA = norm(vertices[0] - vertices[1]);
+	float widthB = norm(vertices[2] - vertices[3]);
+	float maxWidth = std::max(widthA, widthB);
+
+	float heightA = norm(vertices[1] - vertices[2]);
+	float heightB = norm(vertices[3] - vertices[0]);
+	float maxHeight = std::max(heightA, heightB);
+
+	const Size outputSize = Size(maxHeight, maxWidth);
 
 	Point2f targetVertices[4] = { Point(0, outputSize.height - 1), Point(0, 0), Point(outputSize.width - 1, 0),
 								  Point(outputSize.width - 1, outputSize.height - 1) };
