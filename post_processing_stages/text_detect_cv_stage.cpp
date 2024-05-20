@@ -83,7 +83,7 @@ void TextDetectCvStage::Read(boost::property_tree::ptree const &params)
 	recognizer_ = TextRecognitionModel(recModelName_);
 
 	vocName_ = params.get<char>("vocabulary_name", "/usr/local/share/OpenCV/vocabulary.txt");
-	refresh_rate_ = params.get<int>("refresh_rate", 5);
+	refresh_rate_ = params.get<int>("refresh_rate", 1);
 	draw_features_ = params.get<int>("draw_features", 1);
 	int width = params.get<int>("width", 736);
 	int height = params.get<int>("height", 736);
@@ -251,15 +251,7 @@ void TextDetectCvStage::detectFeatures()
 
 void TextDetectCvStage::fourPointsTransform(const Mat &frame, const Point2f vertices[], Mat &result)
 {
-	float widthA = norm(vertices[0] - vertices[1]);
-	float widthB = norm(vertices[2] - vertices[3]);
-	float maxWidth = std::max(widthA, widthB);
-
-	float heightA = norm(vertices[1] - vertices[2]);
-	float heightB = norm(vertices[3] - vertices[0]);
-	float maxHeight = std::max(heightA, heightB);
-
-	const Size outputSize = Size(maxHeight, maxWidth);
+	const Size outputSize = Size(100, 32);
 
 	Point2f targetVertices[4] = { Point(0, outputSize.height - 1), Point(0, 0), Point(outputSize.width - 1, 0),
 								  Point(outputSize.width - 1, outputSize.height - 1) };
