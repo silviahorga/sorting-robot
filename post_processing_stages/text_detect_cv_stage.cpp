@@ -15,6 +15,8 @@
 #include <libcamera/geometry.h>
 
 #include "core/rpicam_app.hpp"
+#include "post_processing_stages/lights/light_control.hpp"
+#include "post_processing_stages/motors/motor_control.hpp"
 
 #include "post_processing_stages/post_processing_stage.hpp"
 
@@ -64,6 +66,7 @@ private:
 	std::string recModelName_;
 	std::string vocName_;
 	int refresh_rate_;
+	int lightThreshold_;
 	int draw_features_;
 };
 
@@ -85,6 +88,7 @@ void TextDetectCvStage::Read(boost::property_tree::ptree const &params)
 	vocName_ = params.get<char>("vocabulary_name", "/usr/local/share/OpenCV/vocabulary.txt");
 	refresh_rate_ = params.get<int>("refresh_rate", 1);
 	draw_features_ = params.get<int>("draw_features", 1);
+	lightThreshold_ = params.get<int>("light_threshold", 100);
 	int width = params.get<int>("width", 736);
 	int height = params.get<int>("height", 736);
 	float binThresh = params.get<float>("bin_thresh", 0.3);
@@ -181,19 +185,26 @@ bool TextDetectCvStage::Process(CompletedRequestPtr &completed_request)
 
 	std::unique_lock<std::mutex> lock(text_mutex_);
 
-	/*
-	std::vector<libcamera::Rectangle> temprect;
-	std::transform(faces_.begin(), faces_.end(), std::back_inserter(temprect),
-				   [](Rect &r) { return libcamera::Rectangle(r.x, r.y, r.width, r.height); });
-	completed_request->post_process_metadata.Set("detected_faces", temprect);
-	 */
+	BufferWriteSync w(app_, completed_request->buffers[full_stream_]);
+	libcamera::Span<uint8_t> buffer = w.Get()[0];
+	uint8_t *ptr = (uint8_t *)buffer.data();
+	Mat image(full_stream_info_.height, full_stream_info_.width, CV_8U, ptr, full_stream_info_.stride);
+
+	// turning on the light
+	if (mean(image)[0] < lightThreshold_)
+	{
+		lightOn();
+	}
+	else
+	{
+		lightOff();
+	}
+
+	// moving servos
+	moveServos();
 
 	if (draw_features_)
 	{
-		BufferWriteSync w(app_, completed_request->buffers[full_stream_]);
-		libcamera::Span<uint8_t> buffer = w.Get()[0];
-		uint8_t *ptr = (uint8_t *)buffer.data();
-		Mat image(full_stream_info_.height, full_stream_info_.width, CV_8U, ptr, full_stream_info_.stride);
 		drawFeatures(image);
 	}
 
